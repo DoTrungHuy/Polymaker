@@ -58,6 +58,28 @@ export interface Recommendation {
   score_breakdown: Record<string, number>
 }
 export interface Exclusion { material_key: string; material_name: string; rule_id: string; reason: string }
+export interface ConditionChange {
+  field: string
+  label: string
+  current_value: unknown
+  required_value: unknown
+  rationale: string
+  user_controllable: boolean
+}
+export interface MaterialDecisionTrace {
+  material_key: string
+  material_name: string
+  status: 'compatible' | 'change_conditions' | 'evidence_blocked' | 'safety_blocked'
+  message: string
+  blocking_rules: Exclusion[]
+  required_changes: ConditionChange[]
+  feasible_after_changes: boolean
+  projected_fit_score?: number
+  projected_evidence_confidence?: number
+  evidence_refs: SourceRef[]
+  ruleset_version: string
+  dataset_version: string
+}
 export interface DecisionResponse {
   request_id: string
   state: DecisionState

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
-import { getMaterials, parseIntent, recommend, sendFeedback } from './api'
-import type { DecisionResponse, MaterialProfile, Recommendation, SelectionForm } from './types'
+import { explainMaterial, getMaterials, parseIntent, recommend, sendFeedback } from './api'
+import type { DecisionResponse, MaterialDecisionTrace, MaterialProfile, Recommendation, SelectionForm } from './types'
 
 type View = 'advisor' | 'results' | 'evidence' | 'evaluation'
 
@@ -51,7 +51,7 @@ function RecommendationCard({ item, rank }: { item: Recommendation; rank: number
   </article>
 }
 
-function Advisor({ onResult }: { onResult: (result: DecisionResponse) => void }) {
+function Advisor({ onResult }: { onResult: (result: DecisionResponse, form: SelectionForm) => void }) {
   const [text, setText] = useState('')
   const [form, setForm] = useState(initialForm)
   const [showForm, setShowForm] = useState(false)
@@ -89,7 +89,7 @@ function Advisor({ onResult }: { onResult: (result: DecisionResponse) => void })
     event.preventDefault(); setLoading(true); setError('')
     try {
       const result = await recommend(form)
-      onResult(result)
+      onResult(result, form)
     } catch (err) {
       setError(err instanceof Error ? err.message : '服务暂不可用，请稍后重试。')
     } finally { setLoading(false) }
@@ -99,7 +99,7 @@ function Advisor({ onResult }: { onResult: (result: DecisionResponse) => void })
     <section className="hero-copy">
       <p className="section-index">01 / ADVISOR</p>
       <h1>把“想打印什么”<br />变成<Mark>可验证的选择</Mark></h1>
-      <p className="hero-lead">AI 负责听懂你，规则负责守住边界。PolyPilot 会先排除设备和用途不匹配的材料，再给出有来源的 Top 3。</p>
+      <p className="hero-lead">AI 负责听懂，规则负责守住边界，证据负责解释。PolyPilot 先排除设备和用途不匹配的材料，再给出有来源的 Top 3，并把结果沉淀为可复盘的决策记录。</p>
       <div className="process-line"><span>理解需求</span><i /> <span>硬约束过滤</span><i /> <span>证据化推荐</span></div>
     </section>
 
@@ -137,7 +137,60 @@ function Advisor({ onResult }: { onResult: (result: DecisionResponse) => void })
   </main>
 }
 
-function Results({ result, onRestart }: { result: DecisionResponse; onRestart: () => void }) {
+function valueLabel(field: string, value: unknown) {
+  if (value === null || value === undefined) return '未知'
+  if (typeof value === 'boolean') return value ? '是' : '否'
+  if (typeof value === 'number' && field.includes('_c')) return `${value}℃`
+  return String(value)
+}
+
+function DecisionLab({ result, form }: { result: DecisionResponse; form: SelectionForm }) {
+  const [materialKey, setMaterialKey] = useState(result.excluded[0]?.material_key || '')
+  const [trace, setTrace] = useState<MaterialDecisionTrace | null>(null)
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
+
+  async function inspect() {
+    if (!materialKey) return
+    setLoading(true); setError(''); setTrace(null)
+    try {
+      setTrace(await explainMaterial(materialKey, form))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : '决策轨迹暂时不可用。')
+    } finally { setLoading(false) }
+  }
+
+  if (result.excluded.length === 0) return null
+  return <section className="decision-lab">
+    <div className="lab-heading">
+      <div><span>COUNTERFACTUAL LAB</span><h2>为什么不是这个材料？</h2></div>
+      <p>选择一个被排除的材料，查看阻断规则，以及让它进入候选所需的最小条件变化。</p>
+    </div>
+    <div className="lab-controls">
+      <label><span>目标材料</span><select value={materialKey} onChange={event => { setMaterialKey(event.target.value); setTrace(null) }}>
+        {result.excluded.map(item => <option value={item.material_key} key={item.material_key}>{item.material_name}</option>)}
+      </select></label>
+      <button type="button" onClick={inspect} disabled={loading}>{loading ? '正在重算条件…' : '生成决策轨迹'}</button>
+    </div>
+    {error && <div className="error-box">{error}</div>}
+    {trace && <div className={`trace-result trace-${trace.status}`}>
+      <div className="trace-summary">
+        <div><span>{trace.status.replaceAll('_', ' ').toUpperCase()}</span><h3>{trace.material_name}</h3><p>{trace.message}</p></div>
+        {trace.projected_fit_score !== undefined && <div className="projected-score"><strong>{trace.projected_fit_score}</strong><span>条件变化后<br />预计适配分</span></div>}
+      </div>
+      {trace.required_changes.length > 0 && <div className="change-list">
+        {trace.required_changes.map((change, index) => <article key={`${change.field}-${index}`}>
+          <span>{String(index + 1).padStart(2, '0')}</span>
+          <div><h4>{change.label}</h4><p>{change.rationale}</p><small>{change.user_controllable ? '设备或设置可调整' : '必须按真实用途或证据确认'}</small></div>
+          <div className="change-values"><span>{valueLabel(change.field, change.current_value)}</span><i>→</i><strong>{valueLabel(change.field, change.required_value)}</strong></div>
+        </article>)}
+      </div>}
+      {trace.feasible_after_changes && <div className="trace-footnote">满足以上全部条件后，该材料可进入候选重新评分；这不等于安全或合规保证。</div>}
+    </div>}
+  </section>
+}
+
+function Results({ result, form, onRestart }: { result: DecisionResponse; form: SelectionForm; onRestart: () => void }) {
   const [feedback, setFeedback] = useState<'idle' | 'sent'>('idle')
   const stateLabel = { RECOMMEND: '可推荐', CONDITIONAL: '有条件推荐', NEED_MORE_INFO: '需要补充', NO_COMPATIBLE_MATERIAL: '暂无可靠候选', REFUSE_OR_ESCALATE: '转人工复核' }[result.state]
   return <main className="results-view">
@@ -148,6 +201,7 @@ function Results({ result, onRestart }: { result: DecisionResponse; onRestart: (
     {result.next_question && <div className="clarification"><span>系统只问当前影响最大的一件事</span><h2>{result.next_question}</h2><button onClick={onRestart}>补充条件</button></div>}
     {result.human_escalation && <div className="escalation"><strong>需要人工复核</strong><p>此结果不是材料合规或安全保证。请由材料、结构或合规专业人员根据实际零件验证。</p></div>}
     <div className="recommendation-list">{result.recommendations.map((item, index) => <RecommendationCard item={item} rank={index + 1} key={item.material_key} />)}</div>
+    <DecisionLab result={result} form={form} />
     {result.excluded.length > 0 && <details className="excluded"><summary>查看 {result.excluded.length} 条硬约束排除记录</summary><div>{result.excluded.map(item => <p key={`${item.material_key}-${item.rule_id}`}><code>{item.rule_id}</code><strong>{item.material_name}</strong><span>{item.reason}</span></p>)}</div></details>}
     <div className="feedback-row"><span>{feedback === 'sent' ? '谢谢，反馈已进入评测记录。' : '这次推荐是否帮助你缩小了选择？'}</span>{feedback === 'idle' && <div><button onClick={() => sendFeedback(result.request_id, true).then(() => setFeedback('sent'))}>有帮助</button><button onClick={() => sendFeedback(result.request_id, false).then(() => setFeedback('sent'))}>不符合</button></div>}<button className="restart" onClick={onRestart}>重新选择</button></div>
   </main>
@@ -172,7 +226,7 @@ function Evidence({ materials, loading }: { materials: MaterialProfile[]; loadin
 
 function Evaluation() {
   const metrics = [{ value: '30', label: '金标准场景' }, { value: '100%', label: '硬约束可解释' }, { value: '≥80%', label: 'Top 3 验收线' }, { value: '5', label: '决策状态' }]
-  return <main className="evaluation-view"><div className="page-intro"><p className="section-index">04 / EVALUATION</p><h1>不是“看起来聪明”，而是可以被测量。</h1><p>固定数据、固定规则、固定场景。每次修改都由 CI 重跑，避免只挑成功案例演示。</p></div>
+  return <main className="evaluation-view"><div className="page-intro"><p className="section-index">04 / EVALUATION</p><h1>不是“看起来聪明”，而是可以被测量。</h1><p>内部基准验证规则稳定性；外部试点再测决策时间、重复支持与打印结果，业务收益不由内部回归替代。</p></div>
     <div className="metric-grid">{metrics.map(metric => <div key={metric.label}><strong>{metric.value}</strong><span>{metric.label}</span></div>)}</div>
     <section className="evaluation-method"><div><span>01</span><h2>安全与边界</h2><p>医疗、食品接触、压力容器和安全承重场景必须 100% 转人工；未知证据不得默认为满足。</p></div><div><span>02</span><h2>推荐质量</h2><p>30 个专家标注场景覆盖外观、柔性、户外、耐热、工程材料与设备不兼容，Top 3 命中率验收线为 80%。</p></div><div><span>03</span><h2>AI 稳健性</h2><p>Aily 输出必须通过 Pydantic；无效 JSON、超时或未配置时切换手动表单，不直接生成材料结论。</p></div></section>
     <div className="pipeline"><span>DATA VALIDATION</span><i>→</i><span>PYTEST</span><i>→</i><span>TYPE CHECK</span><i>→</i><span>UI BUILD</span><i>→</i><span>PLAYWRIGHT</span></div>
@@ -182,10 +236,11 @@ function Evaluation() {
 export default function App() {
   const [view, setView] = useState<View>('advisor')
   const [result, setResult] = useState<DecisionResponse | null>(null)
+  const [lastForm, setLastForm] = useState<SelectionForm>(initialForm)
   const [materials, setMaterials] = useState<MaterialProfile[]>([])
   const [materialsLoading, setMaterialsLoading] = useState(true)
   useEffect(() => { getMaterials().then(setMaterials).finally(() => setMaterialsLoading(false)) }, [])
-  function showResult(next: DecisionResponse) { setResult(next); setView('results'); window.scrollTo({ top: 0, behavior: 'smooth' }) }
+  function showResult(next: DecisionResponse, form: SelectionForm) { setResult(next); setLastForm(form); setView('results'); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   function restart() { setResult(null); setView('advisor'); window.scrollTo({ top: 0, behavior: 'smooth' }) }
   return <div className="app-shell">
     <header className="site-header"><button className="brand" onClick={restart}><span>PP</span><div><strong>POLYPILOT</strong><small>MATERIAL DECISION SYSTEM</small></div></button>
@@ -193,9 +248,9 @@ export default function App() {
       <a className="github-link" href="https://github.com/DoTrungHuy/Polymaker" target="_blank" rel="noreferrer">GitHub ↗</a>
     </header>
     {view === 'advisor' && <Advisor onResult={showResult} />}
-    {view === 'results' && result && <Results result={result} onRestart={restart} />}
+    {view === 'results' && result && <Results result={result} form={lastForm} onRestart={restart} />}
     {view === 'evidence' && <Evidence materials={materials} loading={materialsLoading} />}
     {view === 'evaluation' && <Evaluation />}
-    <footer><div><strong>PolyPilot</strong><span>Independent competition entry · Not affiliated with or endorsed by Polymaker</span></div><div><span>DATA {materials.length || '—'} MATERIALS</span><span>RULESET 1.0.0</span><span>2026</span></div></footer>
+    <footer><div><strong>PolyPilot</strong><span>Independent competition entry · Not affiliated with or endorsed by Polymaker</span></div><div><span>DATA {materials.length || 'N/A'} MATERIALS</span><span>RULESET 1.1.0</span><span>2026</span></div></footer>
   </div>
 }

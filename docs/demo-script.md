@@ -1,27 +1,54 @@
-# Three-minute demo script
+# PolyPilot 三分钟演示脚本
 
-## 0:00–0:30 — problem
+## 0:00–0:25 问题与差异
 
-“选材不是问 PLA、PETG、TPU 哪个最好。真实答案同时受用途、环境、打印机和证据质量限制。PolyPilot 把 AI 的语言理解和确定性工程规则拆开。”
+旁白：“Polymaker 官方 Web App 已经能帮助用户发现、过滤和比较材料。PolyPilot 不重复做一个筛选器，而是把‘想打什么’变成企业和用户都能复盘的可信决策：AI 负责听懂，规则负责守边界，证据负责解释，飞书负责协作留痕。”
 
-## 0:30–1:15 — car phone holder
+画面：首页自然语言输入框，快速扫过“理解需求、硬约束过滤、证据化推荐”。
 
-Input: `我想打印一个放在汽车里的手机支架，夏天大约 80℃，不能软化。`
+## 0:25–1:30 汽车高温手机支架
 
-Show intent extraction, equipment form, hard exclusions, HT-PLA/ASA/PC comparison as equipment conditions change, then point out that thermal reference is not a safe service-temperature guarantee.
+输入：`我想打印一个放在汽车里的手机支架，夏天大约 80℃，不能软化。`
 
-## 1:15–1:55 — outdoor bracket
+设备条件：喷嘴 260℃、热床 80℃、无封闭仓、无耐磨喷嘴。
 
-Input: `做一个长期户外日晒雨淋的摄像头支架。`
+展示顺序：
 
-Show the single clarification question for maximum temperature, then compare ASA and PETG after filling the missing value.
+1. Aily 或确定性回退提取最高温度和用途。
+2. 规则排除温度证据不足、设备不兼容或热性能不足的材料。
+3. 展示 Top 3 的适配分与证据置信度，强调适配分不是安全概率。
+4. 打开“为什么不是这个材料”，选择 `Polymaker PETG`。
+5. 展示 PETG 的热性能参考值低于 80℃要求，以及“只有真实环境温度不超过参考值时才可能进入候选”。
 
-## 1:55–2:25 — flexible wearable
+旁白：“普通推荐工具只告诉你选什么。PolyPilot 还能解释答案在什么条件下会改变。”
 
-Input: `普通开放式打印机，做一个柔软耐摔的线缆保护套。`
+## 1:30–2:05 户外摄像头支架
 
-Show non-TPU materials being excluded and compare TPU95 with TPU95-HF.
+输入：`做一个长期户外日晒雨淋的摄像头支架。`
 
-## 2:25–3:00 — evidence and Feishu
+展示：缺少最高环境温度时，系统只提出当前影响最大的一个问题，不直接猜材料。补充 75℃ 后重新计算，查看 ASA 候选和官方来源。
 
-Open the evidence ledger, one official source, evaluation page, then the Feishu result card and Bitable record. Close with: “AI 负责听懂，规则负责守边界，证据负责让结果可复盘。”
+## 2:05–2:30 柔性线缆保护套
+
+输入：`普通开放式打印机，打印柔软耐摔的线缆保护套。`
+
+展示：非 TPU 材料被柔性硬要求排除，比较 TPU95 与 TPU95-HF 的打印窗口、权衡和后处理。
+
+## 2:30–2:50 飞书闭环
+
+在真实飞书租户中展示：
+
+1. 用户发送自然语言需求。
+2. 机器人返回 Card 2.0 Top 3 推荐卡片。
+3. 点击“查看证据”“为什么不是它”或反馈按钮。
+4. 打开多维表格中的请求、规则版本、结果和反馈记录。
+
+旁白：“飞书不是展示层。Aily、Card 2.0 和多维表格把一次推荐变成可复用、可审计、能持续校准的组织决策记录。”
+
+如果真实飞书联调尚未完成，不录制模拟画面冒充真实闭环。
+
+## 2:50–3:00 收尾
+
+旁白：“PolyPilot 不把大模型输出当材料事实。试点将验证它能否把人工检索比较缩短到 5 分钟内、减少重复试错，并帮助经销商和技术支持形成统一、可审计的推荐口径。”
+
+画面：GitHub Actions、30 场景评测、数据账本和项目 GitHub 地址。

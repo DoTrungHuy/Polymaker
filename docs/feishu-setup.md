@@ -56,6 +56,8 @@ The server calls the official synchronous endpoint:
 
 Invalid output, timeout, missing configuration or token failure switches to deterministic/manual mode.
 
+The result card also exposes a “为什么不是它” action. The current callback directs the user to the web decision lab; a fully in-card material picker remains a real-tenant integration task because Card 2.0 action payloads must be verified against the competition tenant.
+
 ## 3. Bitable fields
 
 Create one table with these text/boolean fields:
@@ -72,6 +74,16 @@ Create one table with these text/boolean fields:
 - `Helpful`
 - `Reason`
 - `Selected Material`
+- `Operator Role`
+- `Manual Baseline Minutes`
+- `Decision Minutes`
+- `Support Escalated`
+- `Repeated Question`
+- `Print Outcome`
+- `Failure Reason`
+- `Resolution Status`
+
+The additional fields support the external pilot: they test whether the workflow shortens comparison time, reduces repeated support work and produces reusable decisions. They are measurement fields, not claims that those business improvements have already occurred.
 
 ## 4. Environment variables
 

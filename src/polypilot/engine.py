@@ -5,19 +5,22 @@ from uuid import uuid4
 
 from .models import (
     BudgetLevel,
+    ConditionChange,
+    DecisionLabStatus,
     DecisionResponse,
     DecisionState,
     EvidenceStatus,
     Exclusion,
     ExperienceLevel,
+    MaterialDecisionTrace,
     MaterialProfile,
     Recommendation,
     RiskLevel,
     SelectionRequest,
 )
 
-SCHEMA_VERSION = "1.0.0"
-RULESET_VERSION = "1.0.0"
+SCHEMA_VERSION = "1.1.0"
+RULESET_VERSION = "1.1.0"
 DATASET_VERSION = "2026.07.17-gold12"
 
 RISK_KEYWORDS = {
@@ -117,6 +120,41 @@ def _purpose_targets(request: SelectionRequest) -> set[str]:
     if request.appearance_priority:
         targets.add("decorative")
     return targets
+
+
+def _hard_blockers(material: MaterialProfile, request: SelectionRequest) -> list[Exclusion]:
+    """Return every deterministic blocker for one material in rule priority order."""
+    blockers: list[Exclusion] = []
+
+    def block(rule_id: str, reason: str) -> None:
+        _exclude(blockers, material, rule_id, reason)
+
+    if material.evidence_status is not EvidenceStatus.APPROVED:
+        block("R00_UNAPPROVED_DATA", "材料数据尚未审核，不进入正式推荐。")
+    if (
+        request.printer.nozzle_max_c is not None
+        and request.printer.nozzle_max_c < material.print_settings.nozzle_c.min_c
+    ):
+        block("R02_NOZZLE_LIMIT", "喷嘴温度上限低于官方最低打印温度。")
+    if (
+        request.printer.bed_max_c is not None
+        and request.printer.bed_max_c < material.print_settings.bed_c.min_c
+    ):
+        block("R02_BED_LIMIT", "热床温度上限低于官方最低打印温度。")
+    if material.requires_enclosure and request.printer.has_enclosure is not True:
+        block("R03_ENCLOSURE_REQUIRED", "官方条件要求封闭仓，当前设备未确认具备。")
+    if material.requires_hardened_nozzle and request.printer.has_hardened_nozzle is not True:
+        block("R03_HARDENED_NOZZLE_REQUIRED", "材料具有磨蚀性，官方建议或要求耐磨喷嘴。")
+    if request.flexibility_required and "flexible" not in material.capabilities:
+        block("R04_FLEXIBILITY_MINIMUM", "用户把柔性设为最低要求，该材料不满足。")
+    if request.outdoor_exposure and "outdoor" not in material.capabilities:
+        block("R04_OUTDOOR_MINIMUM", "官方资料未确认该材料适合户外使用。")
+    if request.max_use_temperature_c is not None:
+        if material.heat_reference_c is None:
+            block("R04_TEMPERATURE_EVIDENCE_MISSING", "缺少可审核的热性能参考值，不能默认满足。")
+        elif material.heat_reference_c < request.max_use_temperature_c:
+            block("R04_TEMPERATURE_MINIMUM", "官方热性能参考值低于用户明确的环境温度。")
+    return blockers
 
 
 def _score_material(
@@ -236,45 +274,11 @@ def decide(request: SelectionRequest, materials: list[MaterialProfile]) -> Decis
     triggered_rules: set[str] = set()
 
     for material in materials:
-        if material.evidence_status is not EvidenceStatus.APPROVED:
-            _exclude(excluded, material, "R00_UNAPPROVED_DATA", "材料数据尚未审核，不进入正式推荐。")
-            triggered_rules.add("R00_UNAPPROVED_DATA")
+        blockers = _hard_blockers(material, request)
+        if blockers:
+            excluded.append(blockers[0])
+            triggered_rules.add(blockers[0].rule_id)
             continue
-        if request.printer.nozzle_max_c < material.print_settings.nozzle_c.min_c:
-            _exclude(excluded, material, "R02_NOZZLE_LIMIT", "喷嘴温度上限低于官方最低打印温度。")
-            triggered_rules.add("R02_NOZZLE_LIMIT")
-            continue
-        if request.printer.bed_max_c < material.print_settings.bed_c.min_c:
-            _exclude(excluded, material, "R02_BED_LIMIT", "热床温度上限低于官方最低打印温度。")
-            triggered_rules.add("R02_BED_LIMIT")
-            continue
-        if material.requires_enclosure and request.printer.has_enclosure is not True:
-            _exclude(excluded, material, "R03_ENCLOSURE_REQUIRED", "官方条件要求封闭仓，当前设备未确认具备。")
-            triggered_rules.add("R03_ENCLOSURE_REQUIRED")
-            continue
-        if material.requires_hardened_nozzle and request.printer.has_hardened_nozzle is not True:
-            _exclude(excluded, material, "R03_HARDENED_NOZZLE_REQUIRED", "材料具有磨蚀性，官方建议或要求耐磨喷嘴。")
-            triggered_rules.add("R03_HARDENED_NOZZLE_REQUIRED")
-            continue
-        if request.flexibility_required and "flexible" not in material.capabilities:
-            _exclude(excluded, material, "R04_FLEXIBILITY_MINIMUM", "用户把柔性设为最低要求，该材料不满足。")
-            triggered_rules.add("R04_FLEXIBILITY_MINIMUM")
-            continue
-        if request.outdoor_exposure and "outdoor" not in material.capabilities:
-            _exclude(excluded, material, "R04_OUTDOOR_MINIMUM", "官方资料未确认该材料适合户外使用。")
-            triggered_rules.add("R04_OUTDOOR_MINIMUM")
-            continue
-        if request.max_use_temperature_c is not None:
-            if material.heat_reference_c is None:
-                _exclude(
-                    excluded, material, "R04_TEMPERATURE_EVIDENCE_MISSING", "缺少可审核的热性能参考值，不能默认满足。"
-                )
-                triggered_rules.add("R04_TEMPERATURE_EVIDENCE_MISSING")
-                continue
-            if material.heat_reference_c < request.max_use_temperature_c:
-                _exclude(excluded, material, "R04_TEMPERATURE_MINIMUM", "官方热性能参考值低于用户明确的环境温度。")
-                triggered_rules.add("R04_TEMPERATURE_MINIMUM")
-                continue
 
         score, confidence, breakdown, reasons, conditions = _score_material(material, request)
         if request.printer.nozzle_max_c == material.print_settings.nozzle_c.min_c:
@@ -316,4 +320,184 @@ def decide(request: SelectionRequest, materials: list[MaterialProfile]) -> Decis
         recommendations=top_three,
         excluded=excluded,
         triggered_rules=sorted(triggered_rules),
+    )
+
+
+def explain_material(request: SelectionRequest, material: MaterialProfile) -> MaterialDecisionTrace:
+    """Explain why a target material is unavailable and the smallest explicit changes needed."""
+    risk_tags = detect_risk_tags(request)
+    if request.risk_level is not RiskLevel.NORMAL or risk_tags:
+        return MaterialDecisionTrace(
+            material_key=material.key,
+            material_name=material.display_name,
+            status=DecisionLabStatus.SAFETY_BLOCKED,
+            message="高风险或受监管用途不能通过调整参数自动解除人工复核。",
+            feasible_after_changes=False,
+            evidence_refs=material.source_refs,
+            ruleset_version=RULESET_VERSION,
+            dataset_version=DATASET_VERSION,
+        )
+
+    missing = _need_more_info(request)
+    if missing:
+        return MaterialDecisionTrace(
+            material_key=material.key,
+            material_name=material.display_name,
+            status=DecisionLabStatus.CHANGE_CONDITIONS,
+            message=missing.next_question or missing.message,
+            feasible_after_changes=False,
+            evidence_refs=material.source_refs,
+            ruleset_version=RULESET_VERSION,
+            dataset_version=DATASET_VERSION,
+        )
+
+    blockers = _hard_blockers(material, request)
+    if not blockers:
+        score, confidence, _, _, _ = _score_material(material, request)
+        return MaterialDecisionTrace(
+            material_key=material.key,
+            material_name=material.display_name,
+            status=DecisionLabStatus.COMPATIBLE,
+            message="该材料已通过当前全部硬约束；若未进入 Top 3，原因是综合排序而不是设备不兼容。",
+            feasible_after_changes=True,
+            projected_fit_score=score,
+            projected_evidence_confidence=confidence,
+            evidence_refs=material.source_refs,
+            ruleset_version=RULESET_VERSION,
+            dataset_version=DATASET_VERSION,
+        )
+
+    changes: list[ConditionChange] = []
+    projected = request.model_copy(deep=True)
+    evidence_blocked = False
+    for blocker in blockers:
+        if blocker.rule_id == "R00_UNAPPROVED_DATA":
+            evidence_blocked = True
+            changes.append(
+                ConditionChange(
+                    field="evidence_status",
+                    label="完成数据审核",
+                    current_value=material.evidence_status.value,
+                    required_value=EvidenceStatus.APPROVED.value,
+                    rationale="未经审核的数据不能通过用户设置变更进入正式推荐。",
+                    user_controllable=False,
+                )
+            )
+        elif blocker.rule_id == "R02_NOZZLE_LIMIT":
+            changes.append(
+                ConditionChange(
+                    field="printer.nozzle_max_c",
+                    label="提高喷嘴温度能力",
+                    current_value=request.printer.nozzle_max_c,
+                    required_value=material.print_settings.nozzle_c.min_c,
+                    rationale="达到该材料官方最低喷嘴温度。",
+                )
+            )
+            projected.printer.nozzle_max_c = material.print_settings.nozzle_c.min_c
+        elif blocker.rule_id == "R02_BED_LIMIT":
+            changes.append(
+                ConditionChange(
+                    field="printer.bed_max_c",
+                    label="提高热床温度能力",
+                    current_value=request.printer.bed_max_c,
+                    required_value=material.print_settings.bed_c.min_c,
+                    rationale="达到该材料官方最低热床温度。",
+                )
+            )
+            projected.printer.bed_max_c = material.print_settings.bed_c.min_c
+        elif blocker.rule_id == "R03_ENCLOSURE_REQUIRED":
+            changes.append(
+                ConditionChange(
+                    field="printer.has_enclosure",
+                    label="增加封闭仓",
+                    current_value=request.printer.has_enclosure,
+                    required_value=True,
+                    rationale="该材料的官方打印条件要求封闭仓。",
+                )
+            )
+            projected.printer.has_enclosure = True
+        elif blocker.rule_id == "R03_HARDENED_NOZZLE_REQUIRED":
+            changes.append(
+                ConditionChange(
+                    field="printer.has_hardened_nozzle",
+                    label="更换耐磨喷嘴",
+                    current_value=request.printer.has_hardened_nozzle,
+                    required_value=True,
+                    rationale="纤维填充材料会磨损普通喷嘴。",
+                )
+            )
+            projected.printer.has_hardened_nozzle = True
+        elif blocker.rule_id == "R04_FLEXIBILITY_MINIMUM":
+            changes.append(
+                ConditionChange(
+                    field="flexibility_required",
+                    label="重新确认柔性是否为硬要求",
+                    current_value=True,
+                    required_value=False,
+                    rationale="该材料本身不能满足柔性底线；只有需求改变时才可进入候选。",
+                    user_controllable=False,
+                )
+            )
+            projected.flexibility_required = False
+        elif blocker.rule_id == "R04_OUTDOOR_MINIMUM":
+            changes.append(
+                ConditionChange(
+                    field="outdoor_exposure",
+                    label="仅限非户外场景",
+                    current_value=True,
+                    required_value=False,
+                    rationale="官方资料未确认户外适用，不能用偏好设置绕过。",
+                    user_controllable=False,
+                )
+            )
+            projected.outdoor_exposure = False
+        elif blocker.rule_id == "R04_TEMPERATURE_EVIDENCE_MISSING":
+            evidence_blocked = True
+            changes.append(
+                ConditionChange(
+                    field="heat_reference_c",
+                    label="补齐热性能证据",
+                    current_value=None,
+                    required_value="approved official reference",
+                    rationale="缺少经审核热性能数据，不能推算安全温度。",
+                    user_controllable=False,
+                )
+            )
+        elif blocker.rule_id == "R04_TEMPERATURE_MINIMUM":
+            changes.append(
+                ConditionChange(
+                    field="max_use_temperature_c",
+                    label="验证更低的实际环境温度",
+                    current_value=request.max_use_temperature_c,
+                    required_value=material.heat_reference_c,
+                    rationale="只有实际最高温度不超过官方热性能参考值时，才可能进入候选。",
+                    user_controllable=False,
+                )
+            )
+            projected.max_use_temperature_c = material.heat_reference_c
+
+    remaining = _hard_blockers(material, projected)
+    feasible = not evidence_blocked and not remaining
+    score: int | None = None
+    confidence: int | None = None
+    if feasible:
+        score, confidence, _, _, _ = _score_material(material, projected)
+
+    return MaterialDecisionTrace(
+        material_key=material.key,
+        material_name=material.display_name,
+        status=DecisionLabStatus.EVIDENCE_BLOCKED if evidence_blocked else DecisionLabStatus.CHANGE_CONDITIONS,
+        message=(
+            "证据缺口不能由用户设置自动绕过，需要先完成资料审核。"
+            if evidence_blocked
+            else "以下是让该材料进入候选所需的最小条件变化；涉及用途变化的项目必须按真实场景确认。"
+        ),
+        blocking_rules=blockers,
+        required_changes=changes,
+        feasible_after_changes=feasible,
+        projected_fit_score=score,
+        projected_evidence_confidence=confidence,
+        evidence_refs=material.source_refs,
+        ruleset_version=RULESET_VERSION,
+        dataset_version=DATASET_VERSION,
     )

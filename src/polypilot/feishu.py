@@ -38,6 +38,11 @@ def build_result_card(response: DecisionResponse) -> dict:
                 },
                 {
                     "tag": "button",
+                    "text": {"tag": "plain_text", "content": "为什么不是它"},
+                    "value": {"action": "decision_lab", "request_id": response.request_id},
+                },
+                {
+                    "tag": "button",
                     "text": {"tag": "plain_text", "content": "不符合需求"},
                     "value": {"action": "feedback_negative", "request_id": response.request_id},
                 },

@@ -84,3 +84,4 @@ def test_feishu_card_contains_top_material_and_audit_versions():
     assert result.recommendations[0].material_name in serialized
     assert result.dataset_version in serialized
     assert "查看证据" in serialized
+    assert "为什么不是它" in serialized

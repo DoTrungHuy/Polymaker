@@ -22,3 +22,7 @@ HDT, glass transition, Vicat softening and heat stability are different measurem
 ## Copyright and change control
 
 The public repository stores links and structured facts, not copied source PDFs. Any source refresh changes the dataset version, reruns data validation and the 30-scenario benchmark, and requires a human review before release.
+
+## Feedback and business-learning data
+
+External-pilot records separate the user's scenario, decision inputs, selected material, result, correction and operator role. Aggregated patterns may support recommendation consistency, support-content improvement and product-portfolio hypotheses, but no individual record is treated as a product fact. Personal data and free-text feedback must be minimized before analysis, and public artifacts use only anonymized summaries.

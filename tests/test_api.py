@@ -55,6 +55,18 @@ def test_recommendation_endpoint_returns_auditable_top_three():
     assert payload["request_id"].startswith("req_")
 
 
+def test_decision_lab_endpoint_returns_counterfactual_trace():
+    payload = request_payload()
+    payload["max_use_temperature_c"] = 80
+    response = client.post("/api/v1/decision-lab/POLYMAX_PC", json=payload)
+    assert response.status_code == 200
+    trace = response.json()
+    assert trace["material_key"] == "POLYMAX_PC"
+    assert trace["required_changes"]
+    assert any(item["field"] == "printer.nozzle_max_c" for item in trace["required_changes"])
+    assert client.post("/api/v1/decision-lab/DOES_NOT_EXIST", json=payload).status_code == 404
+
+
 def test_intent_endpoint_uses_safe_fallback_without_credentials():
     response = client.post("/api/v1/intent/parse", json={"text": "打印一个户外使用、最高 80℃ 的支架"})
     assert response.status_code == 200

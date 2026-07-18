@@ -5,7 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .audit import audit_sink_for
 from .config import get_settings
-from .engine import DATASET_VERSION, RULESET_VERSION, SCHEMA_VERSION, decide
+from .engine import DATASET_VERSION, RULESET_VERSION, SCHEMA_VERSION, decide, explain_material
 from .feishu import FeishuGateway, build_result_card, extract_message_text
 from .intent import intent_parser_for
 from .models import (
@@ -14,6 +14,7 @@ from .models import (
     FeedbackResponse,
     IntegrationStatus,
     IntentParseRequest,
+    MaterialDecisionTrace,
     MaterialProfile,
     SelectionIntent,
     SelectionRequest,
@@ -22,7 +23,7 @@ from .repository import dataset_metadata, load_material, load_materials
 
 app = FastAPI(
     title="PolyPilot Decision API",
-    version="1.0.0",
+    version="1.1.0",
     description=(
         "Auditable material-selection API for the Polymaker challenge. "
         "AI parses intent; deterministic rules own the decision."
@@ -94,6 +95,14 @@ async def create_recommendation(request: SelectionRequest) -> DecisionResponse:
     return response
 
 
+@app.post("/api/v1/decision-lab/{material_key}", response_model=MaterialDecisionTrace)
+async def decision_lab(material_key: str, request: SelectionRequest) -> MaterialDecisionTrace:
+    material = load_material(material_key)
+    if not material:
+        raise HTTPException(status_code=404, detail="Material not found")
+    return explain_material(request, material)
+
+
 @app.post("/api/v1/feedback", response_model=FeedbackResponse)
 async def create_feedback(feedback: FeedbackRequest) -> FeedbackResponse:
     return await audit_sink_for(get_settings()).record_feedback(feedback)
@@ -155,6 +164,7 @@ async def feishu_card_actions(request: Request) -> dict:
             "type": "success",
             "content": {
                 "evidence": "请在 PolyPilot 网页的证据账本中查看来源。",
+                "decision_lab": "请在 PolyPilot 网页的决策实验室中选择被排除材料。",
                 "feedback_negative": "已收到反馈，请补充不符合需求的原因。",
                 "restart": "请重新发送你的用途和打印机条件。",
             }.get(action.get("action"), "操作已收到。"),

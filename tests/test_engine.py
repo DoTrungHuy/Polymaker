@@ -1,4 +1,4 @@
-from polypilot.engine import decide
+from polypilot.engine import decide, explain_material
 from polypilot.models import DecisionState, RiskLevel, SelectionRequest
 from polypilot.repository import load_materials
 
@@ -95,3 +95,35 @@ def test_response_separates_fit_and_evidence_confidence():
     assert 0 <= first.fit_score <= 100
     assert first.evidence_confidence == 100
     assert first.evidence_refs
+
+
+def test_decision_lab_explains_all_equipment_changes_for_target_material():
+    material = next(item for item in MATERIALS if item.key == "POLYMAX_PC")
+    trace = explain_material(
+        selection(
+            max_use_temperature_c=80,
+            printer={
+                "nozzle_max_c": 240,
+                "bed_max_c": 80,
+                "has_enclosure": False,
+                "has_hardened_nozzle": False,
+            },
+        ),
+        material,
+    )
+    assert trace.status == "change_conditions"
+    assert {item.field for item in trace.required_changes} == {
+        "printer.nozzle_max_c",
+        "printer.bed_max_c",
+        "printer.has_enclosure",
+    }
+    assert trace.feasible_after_changes is True
+    assert trace.projected_fit_score is not None
+
+
+def test_decision_lab_does_not_turn_missing_evidence_into_a_pass():
+    material = next(item for item in MATERIALS if item.key == "PANCHROMA_PLA")
+    trace = explain_material(selection(max_use_temperature_c=50), material)
+    assert trace.status == "evidence_blocked"
+    assert trace.feasible_after_changes is False
+    assert trace.projected_fit_score is None

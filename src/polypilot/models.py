@@ -14,6 +14,13 @@ class DecisionState(StrEnum):
     REFUSE_OR_ESCALATE = "REFUSE_OR_ESCALATE"
 
 
+class DecisionLabStatus(StrEnum):
+    COMPATIBLE = "compatible"
+    CHANGE_CONDITIONS = "change_conditions"
+    EVIDENCE_BLOCKED = "evidence_blocked"
+    SAFETY_BLOCKED = "safety_blocked"
+
+
 class EvidenceStatus(StrEnum):
     APPROVED = "approved"
     REVIEW_PENDING = "review_pending"
@@ -162,6 +169,30 @@ class Exclusion(BaseModel):
     material_name: str
     rule_id: str
     reason: str
+
+
+class ConditionChange(BaseModel):
+    field: str
+    label: str
+    current_value: Any = None
+    required_value: Any = None
+    rationale: str
+    user_controllable: bool = True
+
+
+class MaterialDecisionTrace(BaseModel):
+    material_key: str
+    material_name: str
+    status: DecisionLabStatus
+    message: str
+    blocking_rules: list[Exclusion] = Field(default_factory=list)
+    required_changes: list[ConditionChange] = Field(default_factory=list)
+    feasible_after_changes: bool = False
+    projected_fit_score: int | None = Field(default=None, ge=0, le=100)
+    projected_evidence_confidence: int | None = Field(default=None, ge=0, le=100)
+    evidence_refs: list[SourceRef] = Field(default_factory=list)
+    ruleset_version: str
+    dataset_version: str
 
 
 class Recommendation(BaseModel):
