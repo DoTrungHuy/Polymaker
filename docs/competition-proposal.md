@@ -39,7 +39,7 @@ Feishu is part of the product mechanism rather than a presentation channel: Aily
 - 30 fixed regression scenarios with a current 30/30 local benchmark result.
 - 23 backend tests plus frontend test, type-check and production build.
 - React result comparison, exclusion trace and counterfactual decision lab.
-- FastAPI 1.1, Feishu adapters, Vercel routing and GitHub Actions.
+- FastAPI v1 API, Feishu adapters, Vercel routing and GitHub Actions.
 
 The fixed benchmark measures deterministic regression consistency, not independent expert accuracy or product safety certification.
 
